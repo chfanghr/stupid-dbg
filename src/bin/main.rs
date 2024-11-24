@@ -1,6 +1,4 @@
-mod debuggee;
-
-use std::{thread::sleep, time::Duration};
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use clap::Parser;
@@ -10,6 +8,11 @@ use nonempty::NonEmpty;
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 
+use stupid_dbg::{
+    debuggee::{self, Debuggee},
+    debugger::Debugger,
+};
+
 #[derive(Debug, clap::Parser)]
 struct Cli {
     #[arg(long, short = 'p')]
@@ -17,6 +20,9 @@ struct Cli {
 
     #[arg(long, short = 'v')]
     verbose: bool,
+
+    #[arg(long)]
+    history_file: Option<PathBuf>,
 
     child_args: Vec<String>,
 }
@@ -45,11 +51,10 @@ fn main() -> anyhow::Result<()> {
         (Some(_), _) => Err(anyhow!("ambiguous debuggee config"))?,
     };
 
-    let mut debuggee = debuggee::Debuggee::new(debuggee_config)?;
-    debuggee.resume()?;
-    debuggee.wait_for_state_change()?;
+    let debuggee = Debuggee::new(debuggee_config)?;
+    let mut debugger = Debugger::new(debuggee);
 
-    sleep(Duration::from_secs(10));
+    debugger.repl(cli.history_file)?;
 
     return Ok(());
 }

@@ -1,4 +1,4 @@
-use std::{ffi::CString, process::exit};
+use std::{ffi::CString, ops::Not, process::exit};
 
 use anyhow::anyhow;
 use libc::EXIT_FAILURE;
@@ -6,18 +6,47 @@ use nix::{
     sys::{
         ptrace::{self},
         signal::{kill, Signal},
-        wait::waitpid,
+        wait::{wait, waitpid, WaitPidFlag, WaitStatus},
     },
     unistd::{execvp, fork, ForkResult, Pid},
 };
 use nonempty::NonEmpty;
 use tracing::{debug, debug_span, error, info, warn};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum ProcessState {
     Running,
-    Paused,
-    Exited,
+    Stopped(Option<Signal>),
+    Exited(i32),
+    Terminated(Signal),
+}
+
+impl ProcessState {
+    pub fn is_alive(&self) -> bool {
+        match self {
+            ProcessState::Running | ProcessState::Stopped(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Display for ProcessState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessState::Running => write!(f, "running"),
+            ProcessState::Stopped(signal) => {
+                if let Some(signal) = signal {
+                    write!(f, "stopped with signal: {signal}")
+                } else {
+                    write!(f, "stopped")
+                }
+            }
+            ProcessState::Exited(status_code) => {
+                write!(f, "exited with status code: {status_code}")
+            }
+            ProcessState::Terminated(signal) => write!(f, "terminated with signal: {signal}"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -40,12 +69,12 @@ impl Debuggee {
 
         info!("initializing debuggee");
 
-        let debuggee = match config {
+        let mut debuggee = match config {
             Config::Existing(pid) => {
                 Self::attach(pid)?;
                 Self {
                     pid,
-                    process_state: ProcessState::Paused,
+                    process_state: ProcessState::Stopped(None),
                     should_terminate: false,
                 }
             }
@@ -53,7 +82,7 @@ impl Debuggee {
                 let pid = Self::launch(child_args)?;
                 Self {
                     pid,
-                    process_state: ProcessState::Paused,
+                    process_state: ProcessState::Stopped(None),
                     should_terminate: true,
                 }
             }
@@ -61,7 +90,7 @@ impl Debuggee {
 
         info!(pid = tracing::field::display(&debuggee.pid));
 
-        debuggee.wait_for_state_change()?;
+        debuggee.update_process_state(true)?;
 
         Ok(debuggee)
     }
@@ -131,17 +160,25 @@ impl Debuggee {
     }
 
     pub fn process_state(&self) -> ProcessState {
-        self.process_state
+        self.process_state.clone()
     }
 
-    pub fn wait_for_state_change(&self) -> anyhow::Result<()> {
+    pub fn update_process_state(&mut self, blocking: bool) -> anyhow::Result<()> {
         let span = debug_span!(
             "waiting for debuggee state change",
             pid = tracing::field::display(&self.pid),
         );
         let _entered = span.entered();
 
-        waitpid(self.pid, None)?;
+        let wait_status = waitpid(self.pid, blocking.not().then_some(WaitPidFlag::WNOWAIT))?;
+
+        self.process_state = match wait_status {
+            WaitStatus::Exited(_, status_code) => ProcessState::Exited(status_code),
+            WaitStatus::Signaled(_, signal, _) => ProcessState::Terminated(signal),
+            WaitStatus::Stopped(_, signal) => ProcessState::Stopped(Some(signal)),
+            WaitStatus::Continued(_) | WaitStatus::StillAlive => ProcessState::Running,
+            _ => unreachable!("Unhandled wait status"),
+        };
 
         Ok(())
     }
@@ -154,12 +191,12 @@ impl Debuggee {
         let _entered = span.entered();
 
         match self.process_state {
-            ProcessState::Paused | ProcessState::Running => {
+            ProcessState::Stopped(_) | ProcessState::Running => {
                 ptrace::cont(self.pid, None)?;
                 self.process_state = ProcessState::Running;
             }
-            ProcessState::Exited => {
-                Err(anyhow!("unable to resume an exited process"))?;
+            ProcessState::Exited(_) | ProcessState::Terminated(_) => {
+                Err(anyhow!("unable to resume an exited or terminated process"))?;
             }
         }
 
@@ -179,47 +216,55 @@ impl Drop for Debuggee {
 
         info!("detaching from debuggee");
 
-        if let Err(err) = kill(self.pid, Signal::SIGSTOP) {
-            warn!(
-                error = Box::<dyn std::error::Error + 'static>::from(err),
-                "unable to stop the debuggee process"
-            );
+        let _ = self.update_process_state(false);
 
-            return;
-        };
-
-        if let Err(err) = ptrace::detach(self.pid, Some(Signal::SIGCONT)) {
-            warn!(
-                error = Box::<dyn std::error::Error + 'static>::from(err),
-                "unable to detach from the debuggee process",
-            )
-        }
-
-        if let Err(err) = kill(self.pid, Signal::SIGCONT) {
-            warn!(
-                error = Box::<dyn std::error::Error + 'static>::from(err),
-                "unable to resume the debuggee process",
-            )
-        }
-
-        if self.should_terminate {
-            info!("terminating debuggee");
-
-            if let Err(err) = kill(self.pid, Signal::SIGKILL) {
+        if self.process_state.is_alive() {
+            if let Err(err) = kill(self.pid, Signal::SIGSTOP) {
                 warn!(
                     error = Box::<dyn std::error::Error + 'static>::from(err),
-                    "unable to kill the debuggee"
+                    "unable to stop the debuggee process"
                 );
 
                 return;
-            }
+            };
 
-            if let Err(err) = waitpid(self.pid, None) {
+            if let Err(err) = ptrace::detach(self.pid, Some(Signal::SIGCONT)) {
                 warn!(
                     error = Box::<dyn std::error::Error + 'static>::from(err),
-                    "unable to wait for debuggee to exit"
+                    "unable to detach from the debuggee process",
                 )
             }
+
+            if let Err(err) = kill(self.pid, Signal::SIGCONT) {
+                warn!(
+                    error = Box::<dyn std::error::Error + 'static>::from(err),
+                    "unable to resume the debuggee process",
+                )
+            }
+
+            if self.should_terminate {
+                info!("terminating debuggee");
+
+                if let Err(err) = kill(self.pid, Signal::SIGKILL) {
+                    warn!(
+                        error = Box::<dyn std::error::Error + 'static>::from(err),
+                        "unable to kill the debuggee"
+                    );
+
+                    return;
+                }
+
+                if let Err(err) = waitpid(self.pid, None) {
+                    warn!(
+                        error = Box::<dyn std::error::Error + 'static>::from(err),
+                        "unable to wait for debuggee to exit"
+                    )
+                }
+            }
+        }
+
+        if self.should_terminate {
+            _ = wait();
         }
     }
 }
