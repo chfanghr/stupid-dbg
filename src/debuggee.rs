@@ -1,14 +1,22 @@
-use std::{ffi::CString, ops::Not, process::exit};
+use std::{
+    ffi::CString,
+    fs::File,
+    io::{read_to_string, Write},
+    ops::Not,
+    os::fd::OwnedFd,
+    process::exit,
+};
 
 use anyhow::anyhow;
 use libc::EXIT_FAILURE;
 use nix::{
+    fcntl::OFlag,
     sys::{
         ptrace::{self},
         signal::{kill, Signal},
         wait::{wait, waitpid, WaitPidFlag, WaitStatus},
     },
-    unistd::{execvp, fork, ForkResult, Pid},
+    unistd::{execvp, fork, pipe2, ForkResult, Pid},
 };
 use nonempty::NonEmpty;
 use tracing::{debug, debug_span, error, info, warn};
@@ -116,13 +124,32 @@ impl Debuggee {
 
         info!("launching child process as debuggee");
 
+        let (error_reporting_pipe_read_end, error_reporting_pipe_write_end) =
+            pipe2(OFlag::O_CLOEXEC)?;
+
         match unsafe { fork() }? {
-            ForkResult::Parent { child: pid } => Ok(pid),
-            ForkResult::Child => Self::exec_traceme(child_args),
+            ForkResult::Parent { child: pid } => {
+                drop(error_reporting_pipe_write_end);
+
+                let maybe_error_message = read_to_string(File::from(error_reporting_pipe_read_end))
+                    .map_err(|err| anyhow!("unable to read from error reporting pipe: {}", err))?;
+                if !maybe_error_message.is_empty() {
+                    return Err(anyhow!(
+                        "failed to launch debuggee: {}",
+                        maybe_error_message
+                    ));
+                }
+
+                Ok(pid)
+            }
+            ForkResult::Child => {
+                drop(error_reporting_pipe_read_end);
+                Self::exec_traceme(child_args, error_reporting_pipe_write_end)
+            }
         }
     }
 
-    fn exec_traceme(child_args: NonEmpty<String>) -> ! {
+    fn exec_traceme(child_args: NonEmpty<String>, error_reporting_pipe_write_end: OwnedFd) -> ! {
         let span = debug_span!("child exec_traceme");
         let _entered = span.entered();
 
@@ -147,6 +174,9 @@ impl Debuggee {
 
         match internal() {
             Err(err) => {
+                _ = File::from(error_reporting_pipe_write_end)
+                    .write_all(err.to_string().as_bytes());
+
                 error!(
                     error = Box::<dyn std::error::Error + 'static>::from(err),
                     child_args = ?child_args,
@@ -157,6 +187,10 @@ impl Debuggee {
             }
             Ok(_) => unreachable!("POST EXEC"),
         }
+    }
+
+    pub fn pid(&self) -> Pid {
+        self.pid
     }
 
     pub fn process_state(&self) -> ProcessState {
