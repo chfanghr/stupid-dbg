@@ -3,15 +3,10 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use clap::Parser;
 use libc::pid_t;
-use nix::unistd::Pid;
-use nonempty::NonEmpty;
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 
-use stupid_dbg::{
-    debuggee::{self, Debuggee},
-    debugger::Debugger,
-};
+use stupid_dbg::debugger::{self, Debugger};
 
 #[derive(Debug, clap::Parser)]
 struct Cli {
@@ -41,18 +36,23 @@ fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(collector)
         .map_err(|err| anyhow!("unable to setup logging subscriber: {}", err))?;
 
-    let debuggee_config = match (cli.pid, cli.child_args.len()) {
-        (Some(pid), 0) => debuggee::Config::Existing(Pid::from_raw(pid)),
-        (None, _) => {
-            let child_args =
-                NonEmpty::from_vec(cli.child_args).ok_or(anyhow!("no child argument provided"))?;
-            debuggee::Config::SpawnChild(child_args)
+    let mut debugger = Debugger::new();
+
+    if let debugger::CommandExecutionResult::Quit(result) = match (cli.pid, cli.child_args.len()) {
+        (Some(pid), 0) => debugger.handle_command(debugger::Command::Attach { pid }),
+        (None, len) => {
+            if len > 0 {
+                debugger.handle_command(debugger::Command::Run {
+                    args: cli.child_args,
+                })
+            } else {
+                debugger::CommandExecutionResult::Continue(Ok(()))
+            }
         }
         (Some(_), _) => Err(anyhow!("ambiguous debuggee config"))?,
-    };
-
-    let debuggee = Debuggee::new(debuggee_config)?;
-    let mut debugger = Debugger::new(debuggee);
+    } {
+        return result;
+    }
 
     debugger.repl(cli.history_file)?;
 
