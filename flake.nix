@@ -7,7 +7,7 @@
   };
 
   outputs = inputs@{ flake-parts, flake-lang, git-hooks-nix, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
+    flake-parts.lib.mkFlake { inherit inputs; } ({ lib, ... }: {
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -29,16 +29,23 @@
               ${config.pre-commit.installationScript}
             '';
           };
-        in
-        {
-          pre-commit.settings.hooks = {
-            nixpkgs-fmt.enable = true;
-            deadnix.enable = true;
-            rustfmt.enable = true;
-            typos.enable = true;
-          };
 
-          inherit (rustFlake) packages checks devShells;
-        };
-    };
+          inherit (lib) mkMerge;
+        in
+        mkMerge [
+          {
+            pre-commit.settings.hooks = {
+              nixpkgs-fmt.enable = true;
+              deadnix.enable = true;
+              rustfmt.enable = true;
+              typos.enable = true;
+            };
+
+            inherit (rustFlake) packages checks devShells;
+          }
+          {
+            packages.default = rustFlake.packages.stupid-dbg-rust;
+          }
+        ];
+    });
 }
