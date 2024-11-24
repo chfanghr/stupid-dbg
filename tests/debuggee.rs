@@ -89,6 +89,14 @@ mod debuggee_tests {
                 "yes".to_string()
             }
         }
+
+        pub fn get_program_exiting_immediately() -> String {
+            if let Ok(program) = env::var("STUPID_DBG_TEST_PROGRAM_EXITING_IMMEDIATELY") {
+                program
+            } else {
+                "true".to_string()
+            }
+        }
     }
 
     #[ctor::ctor]
@@ -164,5 +172,16 @@ mod debuggee_tests {
         assert!(expected_states
             .into_iter()
             .any(|expected| debuggee_procfs_state == expected))
+    }
+
+    #[test]
+    fn launch_and_resume_program_exiting_immediately() {
+        let mut debuggee = Debuggee::new(debuggee::Config::SpawnChild(nonempty![
+            aux::get_program_exiting_immediately()
+        ]))
+        .unwrap();
+        debuggee.resume().unwrap();
+        debuggee.update_process_state(true).unwrap();
+        assert!(debuggee.resume().is_err())
     }
 }

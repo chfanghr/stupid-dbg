@@ -10,6 +10,7 @@ use std::{
 use anyhow::anyhow;
 use libc::EXIT_FAILURE;
 use nix::{
+    errno::Errno,
     fcntl::OFlag,
     sys::{
         ptrace::{self},
@@ -25,7 +26,7 @@ use tracing::{debug, debug_span, error, info, warn};
 pub enum ProcessState {
     Running,
     Stopped(Option<Signal>),
-    Exited(i32),
+    Exited(Option<i32>),
     Terminated(Signal),
 }
 
@@ -50,7 +51,11 @@ impl std::fmt::Display for ProcessState {
                 }
             }
             ProcessState::Exited(status_code) => {
-                write!(f, "exited with status code: {status_code}")
+                if let Some(status_code) = status_code {
+                    write!(f, "exited with status code: {status_code}")
+                } else {
+                    write!(f, "exited")
+                }
             }
             ProcessState::Terminated(signal) => write!(f, "terminated with signal: {signal}"),
         }
@@ -204,14 +209,16 @@ impl Debuggee {
         );
         let _entered = span.entered();
 
-        let wait_status = waitpid(self.pid, blocking.not().then_some(WaitPidFlag::WNOWAIT))?;
+        let wait_status = waitpid(self.pid, blocking.not().then_some(WaitPidFlag::WNOWAIT));
 
         self.process_state = match wait_status {
-            WaitStatus::Exited(_, status_code) => ProcessState::Exited(status_code),
-            WaitStatus::Signaled(_, signal, _) => ProcessState::Terminated(signal),
-            WaitStatus::Stopped(_, signal) => ProcessState::Stopped(Some(signal)),
-            WaitStatus::Continued(_) | WaitStatus::StillAlive => ProcessState::Running,
-            _ => unreachable!("Unhandled wait status"),
+            Ok(WaitStatus::Exited(_, status_code)) => ProcessState::Exited(Some(status_code)),
+            Ok(WaitStatus::Signaled(_, signal, _)) => ProcessState::Terminated(signal),
+            Ok(WaitStatus::Stopped(_, signal)) => ProcessState::Stopped(Some(signal)),
+            Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::StillAlive) => ProcessState::Running,
+            Ok(_) => unreachable!("Unhandled wait status"),
+            Err(Errno::ECHILD) => ProcessState::Exited(None),
+            Err(err) => Err(err)?,
         };
 
         Ok(())
