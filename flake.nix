@@ -13,6 +13,7 @@
       ];
 
       imports = [
+        ./helper-proc-macros/build.nix
         ./stupid-dbg/build.nix
         ./pre-commit.nix
         ./settings.nix
