@@ -391,7 +391,7 @@ impl RegDef {
 fn field_size_macro() -> TokenStream {
     quote! {
         macro_rules! field_size {
-            ($t:path :: $field:ident) => {{
+            ($t:path, $field:ident) => {{
                 let m = core::mem::MaybeUninit::<$t>::uninit();
                 let p = unsafe {
                     core::ptr::addr_of!((*(&m as *const _ as *const $t)).$field)
@@ -524,6 +524,7 @@ impl RegDefs {
 
         parse_quote!(
             pub fn byte_width(&self) -> usize {
+                #[allow(unused)]
                 #field_size_macro
 
                 match self {
