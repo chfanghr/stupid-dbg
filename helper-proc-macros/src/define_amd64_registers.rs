@@ -377,7 +377,7 @@ impl RegDef {
                 ..
             }) => {
                 let name_in_fpregs_struct = format_ident!("{}", name_in_fpregs_struct);
-                parse_quote!(field_size!(libc::user_regs_struct, #name_in_fpregs_struct))
+                parse_quote!(field_size!(libc::user_fpregs_struct, #name_in_fpregs_struct))
             }
             RegDef::FpSt(_) => parse_quote!(16usize),
             RegDef::FpMM(_) => parse_quote!(8usize),
