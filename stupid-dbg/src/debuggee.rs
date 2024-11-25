@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     ffi::CString,
     fs::File,
     io::{read_to_string, Write},
@@ -21,6 +22,8 @@ use nix::{
 };
 use nonempty::NonEmpty;
 use tracing::{debug, debug_span, error, info, warn};
+
+use crate::aux::box_err;
 
 #[derive(Debug, Clone)]
 pub enum ProcessState {
@@ -158,7 +161,7 @@ impl Debuggee {
         let span = debug_span!("child exec_traceme");
         let _entered = span.entered();
 
-        let internal = || -> anyhow::Result<()> {
+        let internal = || -> anyhow::Result<Infallible> {
             let child_args = child_args
                 .iter()
                 .map(|arg| CString::new(arg.clone()).unwrap())
@@ -174,24 +177,19 @@ impl Debuggee {
                 &child_args,
             )?;
 
-            Ok(())
+            unreachable!("POST EXEC")
         };
 
-        match internal() {
-            Err(err) => {
-                _ = File::from(error_reporting_pipe_write_end)
-                    .write_all(err.to_string().as_bytes());
+        let Err(err) = internal();
+        _ = File::from(error_reporting_pipe_write_end).write_all(err.to_string().as_bytes());
 
-                error!(
-                    error = Box::<dyn std::error::Error + 'static>::from(err),
-                    child_args = ?child_args,
-                    "unable to spawn child",
-                );
+        error!(
+            error = box_err(err),
+            child_args = ?child_args,
+            "unable to spawn child",
+        );
 
-                exit(EXIT_FAILURE)
-            }
-            Ok(_) => unreachable!("POST EXEC"),
-        }
+        exit(EXIT_FAILURE)
     }
 
     pub fn pid(&self) -> Pid {
@@ -261,24 +259,21 @@ impl Drop for Debuggee {
 
         if self.process_state.is_alive() {
             if let Err(err) = kill(self.pid, Signal::SIGSTOP) {
-                warn!(
-                    error = Box::<dyn std::error::Error + 'static>::from(err),
-                    "unable to stop the debuggee process"
-                );
+                warn!(error = box_err(err), "unable to stop the debuggee process");
 
                 return;
             };
 
             if let Err(err) = ptrace::detach(self.pid, Some(Signal::SIGCONT)) {
                 warn!(
-                    error = Box::<dyn std::error::Error + 'static>::from(err),
+                    error = box_err(err),
                     "unable to detach from the debuggee process",
                 )
             }
 
             if let Err(err) = kill(self.pid, Signal::SIGCONT) {
                 warn!(
-                    error = Box::<dyn std::error::Error + 'static>::from(err),
+                    error = box_err(err),
                     "unable to resume the debuggee process",
                 )
             }
@@ -287,19 +282,13 @@ impl Drop for Debuggee {
                 info!("terminating debuggee");
 
                 if let Err(err) = kill(self.pid, Signal::SIGKILL) {
-                    warn!(
-                        error = Box::<dyn std::error::Error + 'static>::from(err),
-                        "unable to kill the debuggee"
-                    );
+                    warn!(error = box_err(err), "unable to kill the debuggee");
 
                     return;
                 }
 
                 if let Err(err) = waitpid(self.pid, None) {
-                    warn!(
-                        error = Box::<dyn std::error::Error + 'static>::from(err),
-                        "unable to wait for debuggee to exit"
-                    )
+                    warn!(error = box_err(err), "unable to wait for debuggee to exit")
                 }
             }
         }

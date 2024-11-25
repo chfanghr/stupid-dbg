@@ -8,7 +8,10 @@ use nonempty::NonEmpty;
 use rustyline::error::ReadlineError;
 use tracing::{error, info, warn};
 
-use crate::debuggee::{self, Debuggee};
+use crate::{
+    aux::box_err,
+    debuggee::{self, Debuggee},
+};
 
 #[derive(Debug, clap::Parser)]
 #[command(multicall = true)]
@@ -148,10 +151,7 @@ impl Debugger {
             .as_ref()
             .map(|history_file| rl.load_history(history_file.as_ref()))
         {
-            warn!(
-                error = Box::<dyn std::error::Error + 'static>::from(err),
-                "unable to load history file"
-            )
+            warn!(error = box_err(err), "unable to load history file")
         }
 
         loop {
@@ -166,10 +166,7 @@ impl Debugger {
                     match result {
                         CommandExecutionResult::Continue(Err(err))
                         | CommandExecutionResult::Quit(Err(err)) => {
-                            error!(
-                                error = Box::<dyn std::error::Error + 'static>::from(err),
-                                "failed to execute command"
-                            )
+                            error!(error = box_err(err), "failed to execute command")
                         }
                         _ => (),
                     }
@@ -178,18 +175,14 @@ impl Debugger {
                     }
                 }
                 Err(ReadlineError::Interrupted) => {
-                    info!("ctrl-c");
-                    break;
+                    info!("use `quit` or ctrl+d to exit");
                 }
                 Err(ReadlineError::Eof) => {
                     info!("ctrl-d");
                     break;
                 }
                 Err(err) => {
-                    error!(
-                        error = Box::<dyn std::error::Error + 'static>::from(err),
-                        "unknown readline error"
-                    );
+                    error!(error = box_err(err), "unknown readline error");
                     break;
                 }
             };
@@ -199,10 +192,7 @@ impl Debugger {
             .as_ref()
             .map(|history_file| rl.save_history(history_file.as_ref()))
         {
-            warn!(
-                error = Box::<dyn std::error::Error + 'static>::from(err),
-                "unable to save history file"
-            )
+            warn!(error = box_err(err), "unable to save history file")
         }
 
         Ok(())

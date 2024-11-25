@@ -564,7 +564,7 @@ impl ToTokens for RegDefs {
     }
 }
 
-pub(crate) fn impl_define_registers(
+pub(crate) fn impl_define_amd64_registers(
     input: proc_macro2::TokenStream,
 ) -> Result<proc_macro2::TokenStream> {
     parse2::<RegDefs>(input).map(|defs| defs.to_token_stream())
@@ -586,7 +586,7 @@ fn playground() {
       dr(0);
     };
 
-    let output = impl_define_registers(input).unwrap();
+    let output = impl_define_amd64_registers(input).unwrap();
     let file = syn::parse_file(&output.to_string()).unwrap();
     let pp_output = prettyplease::unparse(&file);
 
