@@ -246,7 +246,7 @@ impl RegDef {
     fn enum_variant_ident(&self) -> Ident {
         format_ident!(
             "{}",
-            self.name().from_case(Case::Flat).to_case(Case::Pascal)
+            self.name().from_case(Case::Snake).to_case(Case::Pascal)
         )
     }
 
@@ -574,6 +574,7 @@ pub(crate) fn impl_define_registers(
 fn playground() {
     let input = quote! {
       gpr_64(rax, 0);
+      gpr_64(orig_rax);
       gpr_32(ebp, rbp);
       gpr_8h(ah, rax);
       fpr(fcw, cwd, 65);
