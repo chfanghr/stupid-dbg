@@ -45,6 +45,66 @@ define_amd64_registers! {
     gpr_64(gs, 55);
     gpr_64(orig_rax);
 
+    // gpr_32(<name>, <base_name>)
+    gpr_32(eax, rax);
+    gpr_32(ebx, rbx);
+    gpr_32(ecx, rcx);
+    gpr_32(edx, rdx);
+    gpr_32(esi, rsi);
+    gpr_32(edi, rdi);
+    gpr_32(ebp, rbp);
+    gpr_32(esp, rsp);
+    gpr_32(r8d, r8);
+    gpr_32(r9d, r9);
+    gpr_32(r10d, r10);
+    gpr_32(r11d, r11);
+    gpr_32(r12d, r12);
+    gpr_32(r13d, r13);
+    gpr_32(r14d, r14);
+    gpr_32(r15d, r15);
+
+    // gpr_16(<name>, <base_name>)
+    gpr_16(ax, rax);
+    gpr_16(bx, rbx);
+    gpr_16(cx, rcx);
+    gpr_16(dx, rdx);
+    gpr_16(si, rsi);
+    gpr_16(di, rdi);
+    gpr_16(bp, rbp);
+    gpr_16(sp, rsp);
+    gpr_16(r8w, r8);
+    gpr_16(r9w, r9);
+    gpr_16(r10w, r10);
+    gpr_16(r11w, r11);
+    gpr_16(r12w, r12);
+    gpr_16(r13w, r13);
+    gpr_16(r14w, r14);
+    gpr_16(r15w, r15);
+
+    // gpr_8l(<name>, <base_name>)
+    gpr_8l(al, rax);
+    gpr_8l(bl, rbx);
+    gpr_8l(cl, rcx);
+    gpr_8l(dl, rdx);
+    gpr_8l(sil, rsi);
+    gpr_8l(dil, rdi);
+    gpr_8l(bpl, rbp);
+    gpr_8l(spl, rsp);
+    gpr_8l(r8b, r8);
+    gpr_8l(r9b, r9);
+    gpr_8l(r10b, r10);
+    gpr_8l(r11b, r11);
+    gpr_8l(r12b, r12);
+    gpr_8l(r13b, r13);
+    gpr_8l(r14b, r14);
+    gpr_8l(r15b, r15);
+
+    // gpr_8h(<name>, <base_name>)
+    gpr_8h(ah, rax);
+    gpr_8h(bh, rbx);
+    gpr_8h(ch, rcx);
+    gpr_8h(dd, rdx);
+
     // fpr(<name>, <field_name_in_user_fpregs_struct>,<dwarf_id>)
     fpr(fcw, cwd, 65);
     fpr(fsw, swd, 66);
