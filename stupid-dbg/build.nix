@@ -5,6 +5,9 @@
         src = ./.;
         crateName = "stupid-dbg";
         devShellHook = config.settings.defaultShellHook;
+        extraSources = [
+          config.packages.helper-proc-macros-rust-src
+        ];
       };
     in
     {
