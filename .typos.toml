@@ -1,0 +1,4 @@
+[default.extend-identifiers]
+Fpr = "Fpr"
+fpr = "fpr"
+parse_fpr = "parse_fpr"

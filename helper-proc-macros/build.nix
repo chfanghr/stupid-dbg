@@ -5,6 +5,7 @@
         src = ./.;
         crateName = "helper-proc-macros";
         devShellHook = config.settings.defaultShellHook;
+        generateDocs = false;
       };
     in
     {
