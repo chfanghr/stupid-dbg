@@ -67,7 +67,7 @@ impl Debugger {
         match &mut self.debuggee {
             Some(debuggee) => action(debuggee),
             None => {
-                warn!("no debuggee, no nothing");
+                warn!("no debuggee, do nothing");
                 CommandExecutionResult::Continue(Ok(()))
             }
         }
@@ -75,7 +75,7 @@ impl Debugger {
 
     fn handle_attach(&mut self, pid: pid_t) -> CommandExecutionResult {
         CommandExecutionResult::Continue(if self.debuggee.is_some() {
-            warn!("use `detach` to detach from current debuggee first");
+            warn!("use `detach` to detach from the current debuggee first");
             Ok(())
         } else {
             Debuggee::new(debuggee::Config::Existing(Pid::from_raw(pid))).map(move |debuggee| {
@@ -86,7 +86,7 @@ impl Debugger {
 
     fn handle_run(&mut self, args: Vec<String>) -> CommandExecutionResult {
         CommandExecutionResult::Continue(if self.debuggee.is_some() {
-            warn!("use `detach` to detach from current debuggee first");
+            warn!("use `detach` to detach from the current debuggee first");
             Ok(())
         } else {
             let inner = move || -> anyhow::Result<()> {
@@ -102,7 +102,7 @@ impl Debugger {
 
     fn handle_detach(&mut self) -> CommandExecutionResult {
         if self.debuggee.is_none() {
-            warn!("no debuggee, no nothing")
+            warn!("no debuggee, do nothing")
         }
         self.debuggee = None;
         CommandExecutionResult::Continue(Ok(()))
