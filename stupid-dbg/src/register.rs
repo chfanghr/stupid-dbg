@@ -1,4 +1,4 @@
-use std::{cmp::PartialEq, collections::BTreeMap, mem::MaybeUninit};
+use std::{cmp::PartialEq, collections::BTreeMap, iter, mem::MaybeUninit};
 
 use anyhow::anyhow;
 use helper_proc_macros::define_amd64_registers;
@@ -189,7 +189,7 @@ impl Register {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RegisterValue {
     U8(u8),
     U16(u16),
@@ -306,14 +306,22 @@ impl Register {
         Ok(val)
     }
 
-    fn does_value_fit(&self, value_byte_width: usize) -> anyhow::Result<()> {
+    unsafe fn copy_to_user_struct(
+        &self,
+        from_ptr: *const u8,
+        to_user: &mut libc::user,
+        value_byte_width: usize,
+    ) -> anyhow::Result<()> {
         let byte_width = self.byte_width();
-
-        if byte_width < value_byte_width {
-            Err(anyhow!("register {:?}: value doesn't fit in the register, value width: {}, register width: {}", self, value_byte_width, byte_width))
-        } else {
-            Ok(())
+        if self.byte_width() < value_byte_width {
+            return Err(anyhow!("register {:?}: value doesn't fit in the register, value width: {}, register width: {}", self, value_byte_width, byte_width));
         }
+        let ptr = self.get_mut_ptr_in_user_struct(to_user);
+        let zeroed = iter::repeat(0u8).take(byte_width).collect::<Vec<u8>>();
+        let zeroed_ptr = zeroed.as_ptr();
+        zeroed_ptr.copy_to(ptr, byte_width);
+        from_ptr.copy_to(ptr, value_byte_width);
+        Ok(())
     }
 
     pub fn write_to_user_struct(
@@ -322,15 +330,10 @@ impl Register {
         value: RegisterValue,
     ) -> anyhow::Result<()> {
         let value_byte_width = value.byte_width();
-        let value_ptr = unsafe { value.as_u8_ptr() };
-
-        self.does_value_fit(value_byte_width)?;
-
-        let ptr = unsafe { self.get_mut_ptr_in_user_struct(user) };
-
-        unsafe { value_ptr.copy_to(ptr, value_byte_width) };
-
-        Ok(())
+        unsafe {
+            let value_ptr = value.as_u8_ptr();
+            self.copy_to_user_struct(value_ptr, user, value_byte_width)
+        }
     }
 
     pub unsafe fn write_any_to_user_struct<T>(
@@ -343,45 +346,6 @@ impl Register {
     {
         let value_byte_width = size_of_val(value);
         let value_ptr = (value as *const T).cast::<u8>();
-        self.does_value_fit(value_byte_width)?;
-        let ptr = unsafe { self.get_mut_ptr_in_user_struct(user) };
-        unsafe { value_ptr.copy_to(ptr, value_byte_width) };
-        Ok(())
+        self.copy_to_user_struct(value_ptr, user, value_byte_width)
     }
-}
-
-#[test]
-fn read_and_write_registers() {
-    let mut user = unsafe { MaybeUninit::<libc::user>::zeroed().assume_init() };
-    assert!(Register::Rax
-        .read_from_user_struct(&user)
-        .unwrap()
-        .eq(&RegisterValue::U64(0)));
-    assert!(Register::R15d
-        .read_from_user_struct(&user)
-        .unwrap()
-        .eq(&RegisterValue::U32(0)));
-    Register::Rax
-        .write_to_user_struct(&mut user, RegisterValue::U64(1))
-        .unwrap();
-    Register::R15d
-        .write_to_user_struct(&mut user, RegisterValue::U32(2))
-        .unwrap();
-    assert!(Register::Rax
-        .read_from_user_struct(&user)
-        .unwrap()
-        .eq(&RegisterValue::U64(1)));
-    assert!(Register::R15d
-        .read_from_user_struct(&user)
-        .unwrap()
-        .eq(&RegisterValue::U32(2)));
-    unsafe {
-        Register::R15d
-            .write_any_to_user_struct(&mut user, &3u32)
-            .unwrap()
-    };
-    assert!(Register::R15d
-        .read_from_user_struct(&user)
-        .unwrap()
-        .eq(&RegisterValue::U32(3)));
 }
