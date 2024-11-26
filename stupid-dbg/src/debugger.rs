@@ -10,7 +10,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     aux::box_err,
-    debuggee::{self, Debuggee},
+    debuggee::{self, Debuggee, ProcessState},
     register::{Register, RegisterValue, Registers},
 };
 
@@ -146,11 +146,35 @@ impl Debugger {
     }
 
     fn handle_continue(&mut self) -> CommandExecutionResult {
+        // TODO: move this to debuggee module
+        fn pp_process_state(state: &ProcessState) {
+            match state {
+                ProcessState::Running => info!(process_state = %"running"),
+                ProcessState::Stopped(signal) => {
+                    if let Some(signal) = signal {
+                        info!(process_state = %"stopped", signal = %signal)
+                    } else {
+                        info!("stopped")
+                    }
+                }
+                ProcessState::Exited(status_code) => {
+                    if let Some(status_code) = status_code {
+                        info!(process_state = %"exited", status_code = status_code)
+                    } else {
+                        info!("exited")
+                    }
+                }
+                ProcessState::Terminated(signal) => {
+                    info!(process_state = %"terminated", signal = %signal)
+                }
+            }
+        }
+
         self.handle_with_debuggee_mut(&mut move |debuggee| {
             let mut inner = || -> anyhow::Result<()> {
                 debuggee.resume()?;
                 debuggee.update_process_state(true)?;
-                info!(process_state = %debuggee.process_state());
+                pp_process_state(&debuggee.process_state());
                 Ok(())
             };
 
