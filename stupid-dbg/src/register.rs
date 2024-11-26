@@ -221,14 +221,14 @@ impl Display for RegisterValue {
         }
 
         match self {
-            RegisterValue::U8(x) => write!(f, "{:#02x}", x),
-            RegisterValue::U16(x) => write!(f, "{:#04x}", x),
-            RegisterValue::U32(x) => write!(f, "{:#08x}", x),
-            RegisterValue::U64(x) => write!(f, "{:#016x}", x),
-            RegisterValue::I8(x) => write!(f, "{:#02x}", x),
-            RegisterValue::I16(x) => write!(f, "{:#04x}", x),
-            RegisterValue::I32(x) => write!(f, "{:#08x}", x),
-            RegisterValue::I64(x) => write!(f, "{:#016x}", x),
+            RegisterValue::U8(x) => write!(f, "{:#04x}", x),
+            RegisterValue::U16(x) => write!(f, "{:#06x}", x),
+            RegisterValue::U32(x) => write!(f, "{:#010x}", x),
+            RegisterValue::U64(x) => write!(f, "{:#018x}", x),
+            RegisterValue::I8(x) => write!(f, "{:#04x}", x),
+            RegisterValue::I16(x) => write!(f, "{:#06x}", x),
+            RegisterValue::I32(x) => write!(f, "{:#010x}", x),
+            RegisterValue::I64(x) => write!(f, "{:#018x}", x),
             RegisterValue::F128(x) => write!(f, "{}", x),
             RegisterValue::Byte64(x) => write!(f, "{}", pp_u8_vec(x)),
             RegisterValue::Byte128(x) => write!(f, "{}", pp_u8_vec(x)),
