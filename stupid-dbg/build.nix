@@ -8,6 +8,7 @@
         extraSources = [
           config.packages.helper-proc-macros-rust-src
         ];
+        rustChannel = "nightly";
       };
     in
     {
