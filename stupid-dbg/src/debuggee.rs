@@ -23,7 +23,7 @@ use nix::{
 use nonempty::NonEmpty;
 use tracing::{debug, debug_span, error, info, warn};
 
-use crate::aux::box_err;
+use crate::{aux::box_err, register::Registers};
 
 #[derive(Debug, Clone)]
 pub enum ProcessState {
@@ -70,6 +70,7 @@ pub struct Debuggee {
     pid: Pid,
     process_state: ProcessState,
     should_terminate: bool,
+    registers: Option<Registers>,
 }
 
 #[derive(Debug)]
@@ -92,6 +93,7 @@ impl Debuggee {
                     pid,
                     process_state: ProcessState::Stopped(None),
                     should_terminate: false,
+                    registers: None,
                 }
             }
             Config::SpawnChild(child_args) => {
@@ -100,6 +102,7 @@ impl Debuggee {
                     pid,
                     process_state: ProcessState::Stopped(None),
                     should_terminate: true,
+                    registers: None,
                 }
             }
         };
@@ -200,6 +203,14 @@ impl Debuggee {
         self.process_state.clone()
     }
 
+    pub fn registers(&self) -> Option<&Registers> {
+        self.registers.as_ref()
+    }
+
+    pub fn registers_mut(&mut self) -> Option<&mut Registers> {
+        self.registers.as_mut()
+    }
+
     pub fn update_process_state(&mut self, blocking: bool) -> anyhow::Result<()> {
         let span = debug_span!(
             "waiting for debuggee state change",
@@ -218,6 +229,10 @@ impl Debuggee {
             Err(Errno::ECHILD) => ProcessState::Exited(None),
             Err(err) => Err(err)?,
         };
+
+        if let ProcessState::Stopped(_) = self.process_state {
+            self.read_registers()?;
+        }
 
         Ok(())
     }
@@ -242,6 +257,21 @@ impl Debuggee {
         info!("debuggee process resumed");
 
         return Ok(());
+    }
+
+    fn read_registers(&mut self) -> anyhow::Result<()> {
+        let span = debug_span!(
+            "read registers of debuggee",
+            pid = tracing::field::display(&self.pid),
+        );
+        let _entered = span.entered();
+
+        debug!("reading registers");
+        let regs = Registers::read_with_ptrace(self.pid)?;
+
+        self.registers = Some(regs);
+
+        Ok(())
     }
 }
 

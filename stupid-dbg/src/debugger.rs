@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 use crate::{
     aux::box_err,
     debuggee::{self, Debuggee},
+    register::{Register, Registers},
 };
 
 #[derive(Debug, clap::Parser)]
@@ -22,11 +23,24 @@ struct CommandWrapper {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
-    Attach { pid: pid_t },
-    Run { args: Vec<String> },
+    Attach {
+        pid: pid_t,
+    },
+    Run {
+        args: Vec<String>,
+    },
     Detach,
     Continue,
+    Register {
+        #[command(subcommand)]
+        command: RegisterCommand,
+    },
     Quit,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum RegisterCommand {
+    Read { name: Option<String> },
 }
 
 pub enum CommandExecutionResult {
@@ -59,15 +73,35 @@ impl Debugger {
             Command::Run { args } => self.handle_run(args),
             Command::Detach => self.handle_detach(),
             Command::Continue => self.handle_continue(),
+            Command::Register { command } => self.handle_register_command(command),
             Command::Quit => self.handle_quit(),
         }
     }
 
-    fn handle_with_debuggee<F>(&mut self, action: &mut F) -> CommandExecutionResult
+    pub fn handle_register_command(&mut self, command: RegisterCommand) -> CommandExecutionResult {
+        match command {
+            RegisterCommand::Read { name } => self.handle_register_read(name.as_deref()),
+        }
+    }
+
+    fn handle_with_debuggee_mut<F>(&mut self, action: &mut F) -> CommandExecutionResult
     where
         F: FnMut(&mut Debuggee) -> CommandExecutionResult,
     {
         match &mut self.debuggee {
+            Some(debuggee) => action(debuggee),
+            None => {
+                warn!("no debuggee, do nothing");
+                CommandExecutionResult::Continue(Ok(()))
+            }
+        }
+    }
+
+    fn handle_with_debuggee<F>(&self, action: F) -> CommandExecutionResult
+    where
+        F: FnOnce(&Debuggee) -> CommandExecutionResult,
+    {
+        match &self.debuggee {
             Some(debuggee) => action(debuggee),
             None => {
                 warn!("no debuggee, do nothing");
@@ -112,7 +146,7 @@ impl Debugger {
     }
 
     fn handle_continue(&mut self) -> CommandExecutionResult {
-        self.handle_with_debuggee(&mut move |debuggee| {
+        self.handle_with_debuggee_mut(&mut move |debuggee| {
             let mut inner = || -> anyhow::Result<()> {
                 debuggee.resume()?;
                 debuggee.update_process_state(true)?;
@@ -121,6 +155,44 @@ impl Debugger {
             };
 
             CommandExecutionResult::Continue(inner())
+        })
+    }
+
+    fn handle_register_read(&self, name: Option<&str>) -> CommandExecutionResult {
+        fn pp_register(registers: &Registers, register: Register) -> anyhow::Result<()> {
+            let register_value = registers.read_register(register)?;
+
+            // TODO: actually pretty print the values and move all these to register module
+            info!(register = ?register, register_value = ?register_value);
+
+            Ok(())
+        }
+
+        fn pp_register_with_name(registers: &Registers, name: &str) -> anyhow::Result<()> {
+            let register = Register::lookup_by_name(name)
+                .ok_or(anyhow!("unable to find register with name: {}", name))?;
+            pp_register(registers, register)
+        }
+
+        fn pp_all_registers(registers: &Registers) -> anyhow::Result<()> {
+            Register::all_registers()
+                .into_iter()
+                .try_for_each(|reg| pp_register(registers, reg))?;
+
+            Ok(())
+        }
+
+        self.handle_with_debuggee(|debuggee| {
+            CommandExecutionResult::Continue(match debuggee.registers() {
+                Some(registers) => match name {
+                    Some(name) => pp_register_with_name(registers, name),
+                    None => pp_all_registers(registers),
+                },
+                None => {
+                    warn!("no register info available");
+                    Ok(())
+                }
+            })
         })
     }
 

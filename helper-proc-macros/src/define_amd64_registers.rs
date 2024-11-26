@@ -466,7 +466,7 @@ impl RegDefs {
         )
     }
 
-    fn all_variants_item_fn(&self) -> ItemFn {
+    fn all_registers_item_fn(&self) -> ItemFn {
         let variant_count = self.defs.len();
         let variants = self.defs.iter().map(|def| -> Expr {
             let variant = def.enum_variant_ident();
@@ -474,7 +474,7 @@ impl RegDefs {
         });
 
         parse_quote!(
-            pub fn all_variants() -> [Self;#variant_count] {
+            pub fn all_registers() -> [Self;#variant_count] {
                 [
                     #(#variants),*
                 ]
@@ -534,14 +534,35 @@ impl RegDefs {
         )
     }
 
+    fn all_debug_registers_item_fn(&self) -> ItemFn {
+        let exprs = self
+            .defs
+            .iter()
+            .filter(|def| if let RegDef::Dr(_) = def { true } else { false })
+            .map(|def| -> Expr {
+                let ident = def.enum_variant_ident();
+                parse_quote!(Self::#ident)
+            });
+        let count = exprs.clone().count();
+
+        parse_quote! {
+            pub fn all_debug_registers() -> [Self; #count] {
+                [
+                    #(#exprs),*
+                ]
+            }
+        }
+    }
+
     fn item_impl(&self) -> ItemImpl {
         let offset_in_user_struct_member_fn = self.offset_in_user_struct_item_fn();
         let dwarf_id_item_fn = self.dwarf_id_item_fn();
         let name_item_fn = self.name_item_fn();
-        let all_variants_item_fn = self.all_variants_item_fn();
+        let all_variants_item_fn = self.all_registers_item_fn();
         let kind_fn_item = self.kind_fn_item();
         let repr_fn_item = self.repr_fn_item();
         let byte_width_fn_item = self.byte_width_fn_item();
+        let all_debug_registers_item_fn = self.all_debug_registers_item_fn();
 
         parse_quote!(
             impl Register{
@@ -552,6 +573,7 @@ impl RegDefs {
                 #kind_fn_item
                 #repr_fn_item
                 #byte_width_fn_item
+                #all_debug_registers_item_fn
             }
         )
     }

@@ -3,6 +3,10 @@ use std::{cmp::PartialEq, collections::BTreeMap, iter, mem::MaybeUninit};
 use anyhow::anyhow;
 use helper_proc_macros::define_amd64_registers;
 use lazy_static::lazy_static;
+use nix::{sys::ptrace, unistd::Pid};
+use tracing::debug;
+
+use crate::aux::{ptrace_getfpregs, read_any_from_void_pointer};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -169,11 +173,11 @@ define_amd64_registers! {
 }
 
 lazy_static! {
-    static ref NAME_TO_REGISTER_MAP: BTreeMap<&'static str, Register> = Register::all_variants()
+    static ref NAME_TO_REGISTER_MAP: BTreeMap<&'static str, Register> = Register::all_registers()
         .into_iter()
         .map(|reg| (reg.name(), reg))
         .collect();
-    static ref DWARF_ID_TO_REGISTER_MAP: BTreeMap<usize, Register> = Register::all_variants()
+    static ref DWARF_ID_TO_REGISTER_MAP: BTreeMap<usize, Register> = Register::all_registers()
         .into_iter()
         .filter_map(|reg| reg.dwarf_id().map(|id| (id, reg)))
         .collect();
@@ -236,15 +240,6 @@ impl RegisterValue {
             RegisterValue::Byte128(x) => (x as *const [u8; 16]).cast(),
         }
     }
-}
-
-pub unsafe fn read_any_from_void_pointer<T>(from_ptr: *const u8, size: usize) -> T {
-    assert!(size_of::<T>() >= size);
-    let mut ret = MaybeUninit::<T>::zeroed();
-    let ptr = ret.as_mut_ptr().cast::<u8>();
-    from_ptr.copy_to(ptr, size);
-    let ret = ret.assume_init();
-    return ret;
 }
 
 impl Register {
@@ -347,5 +342,54 @@ impl Register {
         let value_byte_width = size_of_val(value);
         let value_ptr = (value as *const T).cast::<u8>();
         self.copy_to_user_struct(value_ptr, user, value_byte_width)
+    }
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct Registers {
+    user: libc::user,
+}
+
+impl Registers {
+    pub fn read_register(&self, register: Register) -> anyhow::Result<RegisterValue> {
+        register.read_from_user_struct(&self.user)
+    }
+
+    pub fn write_register(
+        &mut self,
+        register: Register,
+        value: RegisterValue,
+    ) -> anyhow::Result<()> {
+        register.write_to_user_struct(&mut self.user, value)
+    }
+
+    pub unsafe fn write_register_any<T: Sized>(
+        &mut self,
+        register: Register,
+        value: &T,
+    ) -> anyhow::Result<()> {
+        register.write_any_to_user_struct(&mut self.user, value)
+    }
+
+    pub fn read_with_ptrace(pid: Pid) -> anyhow::Result<Self> {
+        debug!("calling ptrace::getregs");
+
+        let mut user = unsafe { MaybeUninit::<libc::user>::zeroed().assume_init() };
+
+        debug!("reading user registers");
+        user.regs = ptrace::getregs(pid)?;
+
+        debug!("reading floating point registers");
+        user.i387 = ptrace_getfpregs(pid)?;
+
+        for (idx, reg) in iter::zip(0usize..=8, Register::all_debug_registers()) {
+            let offset = reg.offset_in_user_struct();
+            debug!("reading debug register {:?}", reg);
+            let reg_val = ptrace::read_user(pid, offset as *mut libc::c_void)?;
+            user.u_debugreg[idx] = reg_val as u64;
+        }
+
+        Ok(Self { user })
     }
 }
