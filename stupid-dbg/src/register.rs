@@ -1,4 +1,8 @@
+use std::{cmp::PartialEq, collections::BTreeMap, mem::MaybeUninit};
+
+use anyhow::anyhow;
 use helper_proc_macros::define_amd64_registers;
+use lazy_static::lazy_static;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -162,4 +166,222 @@ define_amd64_registers! {
     dr(5);
     dr(6);
     dr(7);
+}
+
+lazy_static! {
+    static ref NAME_TO_REGISTER_MAP: BTreeMap<&'static str, Register> = Register::all_variants()
+        .into_iter()
+        .map(|reg| (reg.name(), reg))
+        .collect();
+    static ref DWARF_ID_TO_REGISTER_MAP: BTreeMap<usize, Register> = Register::all_variants()
+        .into_iter()
+        .filter_map(|reg| reg.dwarf_id().map(|id| (id, reg)))
+        .collect();
+}
+
+impl Register {
+    pub fn lookup_by_name(name: &str) -> Option<Register> {
+        NAME_TO_REGISTER_MAP.get(name).copied()
+    }
+
+    pub fn lookup_by_dwarf_id(dwarf_id: usize) -> Option<Register> {
+        DWARF_ID_TO_REGISTER_MAP.get(&dwarf_id).copied()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegisterValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    F128(f128),
+    Byte64([u8; 8]),
+    Byte128([u8; 16]),
+}
+
+impl RegisterValue {
+    fn byte_width(&self) -> usize {
+        match self {
+            RegisterValue::U8(x) => size_of_val(x),
+            RegisterValue::U16(x) => size_of_val(x),
+            RegisterValue::U32(x) => size_of_val(x),
+            RegisterValue::U64(x) => size_of_val(x),
+            RegisterValue::I8(x) => size_of_val(x),
+            RegisterValue::I16(x) => size_of_val(x),
+            RegisterValue::I32(x) => size_of_val(x),
+            RegisterValue::I64(x) => size_of_val(x),
+            RegisterValue::F128(x) => size_of_val(x),
+            RegisterValue::Byte64(x) => size_of_val(x),
+            RegisterValue::Byte128(x) => size_of_val(x),
+        }
+    }
+
+    unsafe fn as_u8_ptr(&self) -> *const u8 {
+        match self {
+            RegisterValue::U8(x) => x,
+            RegisterValue::U16(x) => (x as *const u16).cast(),
+            RegisterValue::U32(x) => (x as *const u32).cast(),
+            RegisterValue::U64(x) => (x as *const u64).cast(),
+            RegisterValue::I8(x) => (x as *const i8).cast(),
+            RegisterValue::I16(x) => (x as *const i16).cast(),
+            RegisterValue::I32(x) => (x as *const i32).cast(),
+            RegisterValue::I64(x) => (x as *const i64).cast(),
+            RegisterValue::F128(x) => (x as *const f128).cast(),
+            RegisterValue::Byte64(x) => (x as *const [u8; 8]).cast(),
+            RegisterValue::Byte128(x) => (x as *const [u8; 16]).cast(),
+        }
+    }
+}
+
+pub unsafe fn read_any_from_void_pointer<T>(from_ptr: *const u8, size: usize) -> T {
+    assert!(size_of::<T>() >= size);
+    let mut ret = MaybeUninit::<T>::zeroed();
+    let ptr = ret.as_mut_ptr().cast::<u8>();
+    from_ptr.copy_to(ptr, size);
+    let ret = ret.assume_init();
+    return ret;
+}
+
+impl Register {
+    unsafe fn get_ptr_in_user_struct(&self, user: &libc::user) -> *const u8 {
+        let offset = self.offset_in_user_struct();
+        let ptr: *const libc::user = user;
+        let ptr = ptr.cast::<u8>();
+        let ptr = unsafe { ptr.offset(offset.try_into().unwrap()) };
+        return ptr;
+    }
+
+    unsafe fn get_mut_ptr_in_user_struct(&self, user: &mut libc::user) -> *mut u8 {
+        let offset = self.offset_in_user_struct();
+        let ptr: *mut libc::user = user;
+        let ptr = ptr.cast::<u8>();
+        let ptr = unsafe { ptr.offset(offset.try_into().unwrap()) };
+        return ptr;
+    }
+
+    pub fn read_from_user_struct(&self, user: &libc::user) -> anyhow::Result<RegisterValue> {
+        let byte_width = self.byte_width();
+        let repr = self.repr();
+
+        let ptr = unsafe { self.get_ptr_in_user_struct(user) };
+
+        let val = match (repr, byte_width) {
+            (RegisterRepr::UInt, 1) => {
+                RegisterValue::U8(unsafe { read_any_from_void_pointer(ptr, 1) })
+            }
+            (RegisterRepr::UInt, 2) => {
+                RegisterValue::U16(unsafe { read_any_from_void_pointer(ptr, 2) })
+            }
+            (RegisterRepr::UInt, 4) => {
+                RegisterValue::U32(unsafe { read_any_from_void_pointer(ptr, 4) })
+            }
+            (RegisterRepr::UInt, 8) => {
+                RegisterValue::U64(unsafe { read_any_from_void_pointer(ptr, 8) })
+            }
+            (RegisterRepr::LongDouble, byte_width) => {
+                RegisterValue::F128(unsafe { read_any_from_void_pointer(ptr, byte_width) })
+            }
+            (RegisterRepr::Vector, byte_width) => {
+                if byte_width <= 8 {
+                    RegisterValue::Byte64(unsafe { read_any_from_void_pointer(ptr, byte_width) })
+                } else if byte_width <= 16 {
+                    RegisterValue::Byte128(unsafe { read_any_from_void_pointer(ptr, byte_width) })
+                } else {
+                    unreachable!("register {:?}: vector is longer than 128 bit", self)
+                }
+            }
+            (repr, byte_width) => {
+                unreachable!(
+                    "register {:?}: unhandled repr/byte width combination: {:?}, {:?}, ",
+                    self, repr, byte_width,
+                )
+            }
+        };
+
+        Ok(val)
+    }
+
+    fn does_value_fit(&self, value_byte_width: usize) -> anyhow::Result<()> {
+        let byte_width = self.byte_width();
+
+        if byte_width < value_byte_width {
+            Err(anyhow!("register {:?}: value doesn't fit in the register, value width: {}, register width: {}", self, value_byte_width, byte_width))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn write_to_user_struct(
+        &self,
+        user: &mut libc::user,
+        value: RegisterValue,
+    ) -> anyhow::Result<()> {
+        let value_byte_width = value.byte_width();
+        let value_ptr = unsafe { value.as_u8_ptr() };
+
+        self.does_value_fit(value_byte_width)?;
+
+        let ptr = unsafe { self.get_mut_ptr_in_user_struct(user) };
+
+        unsafe { value_ptr.copy_to(ptr, value_byte_width) };
+
+        Ok(())
+    }
+
+    pub unsafe fn write_any_to_user_struct<T>(
+        &self,
+        user: &mut libc::user,
+        value: &T,
+    ) -> anyhow::Result<()>
+    where
+        T: Sized,
+    {
+        let value_byte_width = size_of_val(value);
+        let value_ptr = (value as *const T).cast::<u8>();
+        self.does_value_fit(value_byte_width)?;
+        let ptr = unsafe { self.get_mut_ptr_in_user_struct(user) };
+        unsafe { value_ptr.copy_to(ptr, value_byte_width) };
+        Ok(())
+    }
+}
+
+#[test]
+fn read_and_write_registers() {
+    let mut user = unsafe { MaybeUninit::<libc::user>::zeroed().assume_init() };
+    assert!(Register::Rax
+        .read_from_user_struct(&user)
+        .unwrap()
+        .eq(&RegisterValue::U64(0)));
+    assert!(Register::R15d
+        .read_from_user_struct(&user)
+        .unwrap()
+        .eq(&RegisterValue::U32(0)));
+    Register::Rax
+        .write_to_user_struct(&mut user, RegisterValue::U64(1))
+        .unwrap();
+    Register::R15d
+        .write_to_user_struct(&mut user, RegisterValue::U32(2))
+        .unwrap();
+    assert!(Register::Rax
+        .read_from_user_struct(&user)
+        .unwrap()
+        .eq(&RegisterValue::U64(1)));
+    assert!(Register::R15d
+        .read_from_user_struct(&user)
+        .unwrap()
+        .eq(&RegisterValue::U32(2)));
+    unsafe {
+        Register::R15d
+            .write_any_to_user_struct(&mut user, &3u32)
+            .unwrap()
+    };
+    assert!(Register::R15d
+        .read_from_user_struct(&user)
+        .unwrap()
+        .eq(&RegisterValue::U32(3)));
 }

@@ -1,3 +1,5 @@
+#![feature(f128)]
+
 pub(crate) mod aux;
 pub mod debuggee;
 pub mod debugger;

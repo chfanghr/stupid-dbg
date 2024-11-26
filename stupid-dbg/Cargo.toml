@@ -14,6 +14,7 @@ shlex = "1.3.0"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 helper-proc-macros = { path = "./.extras/helper-proc-macros-v0" }
+lazy_static = "1.5.0"
 
 [dev-dependencies]
 ctor = "0.2.9"

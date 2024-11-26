@@ -556,6 +556,7 @@ dependencies = [
  "clap",
  "ctor",
  "helper-proc-macros",
+ "lazy_static",
  "libc",
  "nix",
  "nonempty",
