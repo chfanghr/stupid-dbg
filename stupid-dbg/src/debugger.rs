@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 use crate::{
     aux::box_err,
     debuggee::{self, Debuggee, ProcessState},
-    register::{Register, RegisterValue, Registers},
+    register::{Register, Registers},
 };
 
 #[derive(Debug, clap::Parser)]
@@ -183,32 +183,10 @@ impl Debugger {
     }
 
     fn handle_register_read(&self, name: Option<&str>) -> CommandExecutionResult {
-        fn pp_u8_vec(vec: &[u8]) -> String {
-            let inner: String = vec
-                .iter()
-                .map(|x| format!("{:#02x}", x))
-                .intersperse(",".to_string())
-                .collect();
-            format!("[{}]", inner)
-        }
+        // TODO: move all these to register module
         fn pp_register(registers: &Registers, register: Register) -> anyhow::Result<()> {
             let register_value = registers.read_register(register)?;
 
-            let register_value: String = match register_value {
-                RegisterValue::F128(x) => format!("{:?}", x), // FIXME: f128 doesn't have a Display instance atm.
-                RegisterValue::U8(x) => format!("{:#02x}", x),
-                RegisterValue::U16(x) => format!("{:#04x}", x),
-                RegisterValue::U32(x) => format!("{:#08x}", x),
-                RegisterValue::U64(x) => format!("{:#016x}", x),
-                RegisterValue::I8(x) => format!("{:#02x}", x),
-                RegisterValue::I16(x) => format!("{:#04x}", x),
-                RegisterValue::I32(x) => format!("{:#08x}", x),
-                RegisterValue::I64(x) => format!("{:#016x}", x),
-                RegisterValue::Byte64(x) => pp_u8_vec(&x),
-                RegisterValue::Byte128(x) => pp_u8_vec(&x),
-            };
-
-            // TODO: move all these to register module
             info!(register = %register.name(), register_value = %register_value);
 
             Ok(())

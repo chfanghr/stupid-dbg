@@ -1,6 +1,7 @@
-use std::{cmp::PartialEq, collections::BTreeMap, iter, mem::MaybeUninit};
+use std::{cmp::PartialEq, collections::BTreeMap, fmt::Display, iter, mem::MaybeUninit};
 
 use anyhow::anyhow;
+use f128::f128;
 use helper_proc_macros::define_amd64_registers;
 use lazy_static::lazy_static;
 use nix::{sys::ptrace, unistd::Pid};
@@ -206,6 +207,33 @@ pub enum RegisterValue {
     F128(f128),
     Byte64([u8; 8]),
     Byte128([u8; 16]),
+}
+
+impl Display for RegisterValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn pp_u8_vec(vec: &[u8]) -> String {
+            let inner: String = vec
+                .iter()
+                .map(|x| format!("{:#02x}", x))
+                .intersperse(",".to_string())
+                .collect();
+            format!("[{}]", inner)
+        }
+
+        match self {
+            RegisterValue::U8(x) => write!(f, "{:#02x}", x),
+            RegisterValue::U16(x) => write!(f, "{:#04x}", x),
+            RegisterValue::U32(x) => write!(f, "{:#08x}", x),
+            RegisterValue::U64(x) => write!(f, "{:#016x}", x),
+            RegisterValue::I8(x) => write!(f, "{:#02x}", x),
+            RegisterValue::I16(x) => write!(f, "{:#04x}", x),
+            RegisterValue::I32(x) => write!(f, "{:#08x}", x),
+            RegisterValue::I64(x) => write!(f, "{:#016x}", x),
+            RegisterValue::F128(x) => write!(f, "{}", x),
+            RegisterValue::Byte64(x) => write!(f, "{}", pp_u8_vec(x)),
+            RegisterValue::Byte128(x) => write!(f, "{}", pp_u8_vec(x)),
+        }
+    }
 }
 
 impl RegisterValue {
