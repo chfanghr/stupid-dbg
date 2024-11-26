@@ -42,29 +42,6 @@ impl ProcessState {
     }
 }
 
-// impl std::fmt::Display for ProcessState {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             ProcessState::Running => write!(f, "running"),
-//             ProcessState::Stopped(signal) => {
-//                 if let Some(signal) = signal {
-//                     write!(f, "stopped with signal: {signal}")
-//                 } else {
-//                     write!(f, "stopped")
-//                 }
-//             }
-//             ProcessState::Exited(status_code) => {
-//                 if let Some(status_code) = status_code {
-//                     write!(f, "exited with status code: {status_code}")
-//                 } else {
-//                     write!(f, "exited")
-//                 }
-//             }
-//             ProcessState::Terminated(signal) => write!(f, "terminated with signal: {signal}"),
-//         }
-//     }
-// }
-
 #[derive(Debug)]
 pub struct Debuggee {
     pid: Pid,

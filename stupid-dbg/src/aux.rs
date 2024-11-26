@@ -9,7 +9,7 @@ where
     err.into()
 }
 
-pub unsafe fn read_any_from_void_pointer<T>(from_ptr: *const u8, size: usize) -> T {
+pub unsafe fn read_any_from_u8_pointer<T>(from_ptr: *const u8, size: usize) -> T {
     assert!(size_of::<T>() >= size);
     let mut ret = MaybeUninit::<T>::zeroed();
     let ptr = ret.as_mut_ptr().cast::<u8>();

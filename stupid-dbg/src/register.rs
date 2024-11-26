@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use nix::{sys::ptrace, unistd::Pid};
 use tracing::debug;
 
-use crate::aux::{ptrace_getfpregs, read_any_from_void_pointer};
+use crate::aux::{ptrace_getfpregs, read_any_from_u8_pointer};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -267,25 +267,25 @@ impl Register {
 
         let val = match (repr, byte_width) {
             (RegisterRepr::UInt, 1) => {
-                RegisterValue::U8(unsafe { read_any_from_void_pointer(ptr, 1) })
+                RegisterValue::U8(unsafe { read_any_from_u8_pointer(ptr, 1) })
             }
             (RegisterRepr::UInt, 2) => {
-                RegisterValue::U16(unsafe { read_any_from_void_pointer(ptr, 2) })
+                RegisterValue::U16(unsafe { read_any_from_u8_pointer(ptr, 2) })
             }
             (RegisterRepr::UInt, 4) => {
-                RegisterValue::U32(unsafe { read_any_from_void_pointer(ptr, 4) })
+                RegisterValue::U32(unsafe { read_any_from_u8_pointer(ptr, 4) })
             }
             (RegisterRepr::UInt, 8) => {
-                RegisterValue::U64(unsafe { read_any_from_void_pointer(ptr, 8) })
+                RegisterValue::U64(unsafe { read_any_from_u8_pointer(ptr, 8) })
             }
             (RegisterRepr::LongDouble, byte_width) => {
-                RegisterValue::F128(unsafe { read_any_from_void_pointer(ptr, byte_width) })
+                RegisterValue::F128(unsafe { read_any_from_u8_pointer(ptr, byte_width) })
             }
             (RegisterRepr::Vector, byte_width) => {
                 if byte_width <= 8 {
-                    RegisterValue::Byte64(unsafe { read_any_from_void_pointer(ptr, byte_width) })
+                    RegisterValue::Byte64(unsafe { read_any_from_u8_pointer(ptr, byte_width) })
                 } else if byte_width <= 16 {
-                    RegisterValue::Byte128(unsafe { read_any_from_void_pointer(ptr, byte_width) })
+                    RegisterValue::Byte128(unsafe { read_any_from_u8_pointer(ptr, byte_width) })
                 } else {
                     unreachable!("register {:?}: vector is longer than 128 bit", self)
                 }
