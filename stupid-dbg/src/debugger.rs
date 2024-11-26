@@ -9,7 +9,7 @@ use rustyline::error::ReadlineError;
 use tracing::{error, info, warn};
 
 use crate::{
-    aux::box_err,
+    aux::{box_err, RlWithOpitonalHistoryFile},
     debuggee::{self, Debuggee, ProcessState},
     register::{Register, Registers},
 };
@@ -241,14 +241,7 @@ impl Debugger {
     where
         T: AsRef<Path>,
     {
-        let mut rl = rustyline::DefaultEditor::new()?;
-
-        if let Some(Err(err)) = history_file
-            .as_ref()
-            .map(|history_file| rl.load_history(history_file.as_ref()))
-        {
-            warn!(error = box_err(err), "unable to load history file")
-        }
+        let mut rl = RlWithOpitonalHistoryFile::new(history_file)?;
 
         loop {
             match rl.readline("dbg> ") {
@@ -282,13 +275,6 @@ impl Debugger {
                     break;
                 }
             };
-        }
-
-        if let Some(Err(err)) = history_file
-            .as_ref()
-            .map(|history_file| rl.save_history(history_file.as_ref()))
-        {
-            warn!(error = box_err(err), "unable to save history file")
         }
 
         Ok(())

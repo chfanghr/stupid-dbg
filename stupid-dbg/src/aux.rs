@@ -1,6 +1,7 @@
-use std::{mem::MaybeUninit, ptr};
+use std::{mem::MaybeUninit, path::Path, ptr};
 
 use nix::{errno::Errno, sys::ptrace, unistd::Pid};
+use tracing::warn;
 
 pub fn box_err<E>(err: E) -> Box<dyn std::error::Error + 'static>
 where
@@ -34,4 +35,44 @@ pub fn ptrace_get_data<T>(request: ptrace::Request, pid: Pid) -> nix::Result<T> 
 
 pub fn ptrace_getfpregs(pid: Pid) -> nix::Result<libc::user_fpregs_struct> {
     ptrace_get_data(ptrace::Request::PTRACE_GETFPREGS, pid)
+}
+
+pub struct RlWithOpitonalHistoryFile<P: AsRef<Path>> {
+    history_file: Option<P>,
+    rl: rustyline::Editor<(), rustyline::history::FileHistory>,
+}
+
+impl<P: AsRef<Path>> RlWithOpitonalHistoryFile<P> {
+    pub fn new(history_file: Option<P>) -> anyhow::Result<Self> {
+        let mut rl = rustyline::DefaultEditor::new()?;
+
+        if let Some(history_file) = &history_file {
+            if let Err(err) = rl.load_history(history_file) {
+                warn!(error = box_err(err), "unable to load history file");
+            }
+        }
+
+        Ok(Self { history_file, rl })
+    }
+
+    pub fn readline(&mut self, prompt: &str) -> rustyline::Result<String> {
+        self.rl.readline(prompt)
+    }
+
+    pub fn add_history_entry<S: AsRef<str> + Into<String>>(
+        &mut self,
+        s: S,
+    ) -> rustyline::Result<bool> {
+        self.rl.add_history_entry(s)
+    }
+}
+
+impl<P: AsRef<Path>> Drop for RlWithOpitonalHistoryFile<P> {
+    fn drop(&mut self) {
+        if let Some(history_file) = &self.history_file {
+            if let Err(err) = self.rl.save_history(history_file) {
+                warn!(error = box_err(err), "unable to save history file");
+            }
+        }
+    }
 }
